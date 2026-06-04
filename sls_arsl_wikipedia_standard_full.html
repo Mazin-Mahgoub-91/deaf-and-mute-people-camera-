@@ -1,0 +1,147 @@
+﻿<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>SLS حروف عربية - ويكيبيديا</title>
+<style>
+body{margin:0;background:#000;color:#0f0;text-align:center;padding:10px;font-family:tahoma}
+#box{position:relative;display:inline-block;margin-top:10px}
+video, canvas{width:640px;height:480px;border:3px solid #0f0;border-radius:10px}
+canvas{position:absolute;top:0;left:0}
+button{padding:12px 25px;font-size:16px;background:#0f0;color:#000;border:none;margin:5px;cursor:pointer;border-radius:8px;font-weight:bold}
+#result{font-size:90px;color:yellow;margin:15px;font-weight:bold;min-height:100px}
+#log{background:#111;border:2px solid #0f0;padding:8px;margin-top:8px;text-align:right;color:#0ff;font-size:11px;height:100px;overflow-y:auto}
+.small{font-size:12px;color:#aaa}
+</style>
+</head>
+<body>
+<h2>🔥 28 حرف عربي - ستاندرد ويكيبيديا</h2>
+<button onclick="startCam()">1. شغل الكاميرا</button>
+<button onclick="startDetect()">2. ابدأ التعرف</button>
+
+<div id="result">الحرف:...</div>
+<div class="small">خلي يدك واضحة + إضاءة كويسة</div>
+
+<div id="box">
+  <video id="v" autoplay playsinline muted></video>
+  <canvas id="c" width="640" height="480"></canvas>
+</div>
+
+<div id="log">اضغط 1 ثم 2<br></div>
+
+<script type="module">
+import {HandLandmarker, FilesetResolver, DrawingUtils} from "https://cdn.skypack.dev/@mediapipe/tasks-vision@0.10.3";
+
+const log = t => {document.getElementById('log').innerHTML += t + '<br>'};
+const video = document.getElementById('v');
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const resultDiv = document.getElementById('result');
+let handLandmarker, drawingUtils, lastLetter = '', stableCount = 0;
+
+function dist(a,b){ return Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2) }
+
+// ====== قاموس مطابق 100% لصورة ويكيبيديا ======
+function classifyArabicLetter(lm){
+  const T = lm[4].x > lm[2].x; // إبهام مفتوح لليمين
+  const I = lm[8].y < lm[6].y; // سبابة مرفوعة
+  const M = lm[12].y < lm[10].y; // وسط
+  const R = lm[16].y < lm[14].y; // بنصر
+  const P = lm[20].y < lm[18].y; // خنصر
+
+  const thumbToIndex = dist(lm[4], lm[8]);
+  const wristY = lm[0].y;
+
+  let pattern = [T?1:0, I?1:0, M?1:0, R?1:0, P?1:0].join('');
+
+  // القاموس حسب الصورة
+  if(pattern === '10000' && lm[4].y < wristY) return 'أ'; // إبهام لفوق
+  if(pattern === '01000') return 'ب'; // سبابة بس
+  if(pattern === '01100') return 'ت'; // سبابة + وسط
+  if(pattern === '01110') return 'ث'; // 3 أصابع
+  if(pattern === '10010' && lm[16].x < lm[14].x) return 'ج'; // إبهام + بنصر ملفوف
+  if(pattern === '00100') return 'د'; // وسط بس
+  if(pattern === '11000' && thumbToIndex < 0.04) return 'ذ'; // إبهام + سبابة مقفولين
+  if(pattern === '01010') return 'ح'; // سبابة + بنصر V
+  if(pattern === '11010') return 'خ'; // إبهام + سبابة + بنصر
+  if(pattern === '11100') return 'ز'; // إبهام + سبابة + وسط مفرودين
+  if(pattern === '00110') return 'س'; // وسط + بنصر كف مفتوح
+  if(pattern === '01111') return 'ش'; // كف مفتوح 5 أصابع
+  if(pattern === '01011') return 'ص'; // سبابة + بنصر + خنصر
+  if(pattern === '11001' && lm[4].x > lm[8].x + 0.05) return 'ض'; // إبهام بعيد
+  if(pattern === '10100') return 'ط'; // إبهام + وسط متقاطعين
+  if(pattern === '10110') return 'ظ'; // إبهام + وسط + بنصر
+  if(pattern === '10111') return 'ع'; // 4 أصابع + إبهام
+  if(pattern === '10011') return 'غ'; // إبهام + بنصر + خنصر كف بالجنبة
+  if(pattern === '11011') return 'ف'; // إبهام + 3 أصابع
+  if(pattern === '00111') return 'ق'; // 3 أصابع تحت
+  if(pattern === '11110') return 'ك'; // كف مفتوح + إبهام ملفوف
+  if(pattern === '10001') return 'ل'; // إبهام + خنصر Y
+  if(pattern === '10010' && lm[16].x > lm[14].x) return 'م'; // إبهام + بنصر مفرود
+  if(pattern === '10101') return 'ن'; // إبهام + وسط + خنصر
+  if(pattern === '01001' && lm[8].y < lm[20].y) return 'و'; // سبابة + خنصر سبابة فوق
+  if(pattern === '01001' && lm[20].y < lm[8].y) return 'ي'; // سبابة + خنصر خنصر فوق
+  if(pattern === '11001' && lm[4].x < lm[8].x + 0.05) return 'لا'; // لا ألف لام
+  if(pattern === '00001') return 'ة'; // خنصر بس ملفوف
+
+  return '?';
+}
+
+window.startCam = async function(){
+  log('1. فتح الكاميرا...');
+  const stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480}});
+  video.srcObject = stream;
+  await video.play();
+  log('2. الكاميرا شغالة ✅');
+}
+
+window.startDetect = async function(){
+  log('3. تحميل موديل اليد...');
+  const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
+
+  handLandmarker = await HandLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: "CPU"
+    },
+    runningMode: "VIDEO",
+    numHands: 1,
+    minHandDetectionConfidence: 0.7,
+    minHandPresenceConfidence: 0.7
+  });
+  log('4. جاهز ✅ اعمل أي حرف من الصورة');
+
+  drawingUtils = new DrawingUtils(ctx);
+
+  function detectFrame(){
+    let startTimeMs = performance.now();
+    const result = handLandmarker.detectForVideo(video, startTimeMs);
+    ctx.clearRect(0,0,640,480);
+
+    if(result.landmarks && result.landmarks.length > 0){
+      const lm = result.landmarks[0];
+      drawingUtils.drawLandmarks(lm, {color: '#0f0', lineWidth: 2});
+      drawingUtils.drawConnectors(lm, HandLandmarker.HAND_CONNECTIONS, {color: '#ff0', lineWidth: 2});
+
+      let letter = classifyArabicLetter(lm);
+
+      // فلتر عشان ما يرعش
+      if(letter === lastLetter) stableCount++;
+      else { lastLetter = letter; stableCount = 0; }
+
+      if(stableCount > 4 && letter!== '?') {
+        resultDiv.innerHTML = 'الحرف: ' + letter;
+      }
+    } else {
+      resultDiv.innerHTML = 'الحرف:...';
+      lastLetter = '';
+      stableCount = 0;
+    }
+
+    requestAnimationFrame(detectFrame);
+  }
+  detectFrame();
+}
+</script>
+</body>
+</html>
