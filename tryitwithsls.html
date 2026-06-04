@@ -1,0 +1,118 @@
+﻿<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>SLS Save 3 Letters</title>
+<style>
+body{margin:0;background:#000;color:#0f0;text-align:center;padding:10px;font-family:tahoma}
+#box{position:relative;display:inline-block}
+video, canvas{width:640px;height:480px;border:3px solid #0f0}
+canvas{position:absolute;top:0;left:0}
+button{padding:12px 25px;font-size:16px;background:#0f0;color:#000;border:none;margin:5px;cursor:pointer;border-radius:8px}
+#log{background:#111;border:2px solid #0f0;padding:8px;margin-top:8px;text-align:right;color:yellow;font-size:13px;height:120px;overflow-y:auto}
+</style>
+</head>
+<body>
+<h3>حفظ 3 حروف SLS</h3>
+<button onclick="start()">1. شغل الكاميرا</button>
+<button onclick="testPose()">2. ابدأ الكشف</button>
+<button onclick="savePose('أ')">3. حفظ حرف أ</button>
+<button onclick="savePose('ب')">حفظ حرف ب</button>
+<button onclick="savePose('ت')">حفظ حرف ت</button>
+<button onclick="showData()">عرض البيانات</button>
+
+<div id="box">
+  <video id="v" autoplay playsinline muted></video>
+  <canvas id="c" width="640" height="480"></canvas>
+</div>
+<div id="log">اضغط 1 ثم 2<br></div>
+
+<script type="module">
+import {PoseLandmarker, FilesetResolver, DrawingUtils} from "https://cdn.skypack.dev/@mediapipe/tasks-vision@0.10.3";
+
+const log = t => {document.getElementById('log').innerHTML += t + '<br>'; console.log(t)};
+const video = document.getElementById('v');
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let pose, drawingUtils, frameCount = 0;
+
+// ====== الإضافة الجديدة كلها هنا تحت drawingUtils ======
+let savedPoses = {}; // هنخزن فيها الحروف
+let lastLandmarks = null; // آخر إحداثيات عشان الحفظ
+
+function savePose(letter){
+  if(!lastLandmarks || lastLandmarks.length === 0){
+    log('❌ ما في جسم مكتشف. قيف كويس قدام الكاميرا');
+    return;
+  }
+
+  // نحفظ 6 نقاط مهمة: كتفين + كوعين + معصمين
+  // MediaPipe: 11=كتف شمال, 12=كتف يمين, 13=كوع شمال, 14=كوع يمين, 15=معصم شمال, 16=معصم يمين
+  savedPoses[letter] = {
+    L_shoulder: [lastLandmarks[11].x, lastLandmarks[11].y, lastLandmarks[11].z],
+    R_shoulder: [lastLandmarks[12].x, lastLandmarks[12].y, lastLandmarks[12].z],
+    L_elbow: [lastLandmarks[13].x, lastLandmarks[13].y, lastLandmarks[13].z],
+    R_elbow: [lastLandmarks[14].x, lastLandmarks[14].y, lastLandmarks[14].z],
+    L_wrist: [lastLandmarks[15].x, lastLandmarks[15].y, lastLandmarks[15].z],
+    R_wrist: [lastLandmarks[16].x, lastLandmarks[16].y, lastLandmarks[16].z]
+  };
+  log('✅ تم حفظ حرف "'+letter+'" بنجاح');
+}
+
+function showData(){
+  log('=== البيانات المحفوظة ===');
+  if(Object.keys(savedPoses).length === 0){
+    log('لسه ما حفظت أي حرف');
+  } else {
+    log(JSON.stringify(savedPoses, null, 2));
+  }
+}
+// ====== نهاية الإضافة ======
+
+window.start = async function(){
+  log('1. فتح الكاميرا 640x480...');
+  const stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480}});
+  video.srcObject = stream;
+  await video.play();
+  log('2. الكاميرا شغالة ✅');
+}
+
+window.testPose = async function(){
+  log('3. تحميل موديل Pose...');
+  const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
+
+  pose = await PoseLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+      delegate: "CPU"
+    },
+    runningMode: "IMAGE",
+    numPoses: 1
+  });
+  log('4. الموديل جاهز ✅ ابدأ الحركات');
+
+  drawingUtils = new DrawingUtils(ctx);
+  frameCount = 0;
+
+  setInterval(async ()=>{
+    if(video.readyState >= 2){
+      frameCount++;
+      const result = await pose.detect(video);
+
+      if(result.landmarks && result.landmarks.length > 0){
+        lastLandmarks = result.landmarks[0]; // نخزن آخر نتيجة عشان الحفظ
+
+        ctx.clearRect(0,0,640,480);
+        drawingUtils.drawLandmarks(lastLandmarks, {color: '#0f0', lineWidth: 3});
+        drawingUtils.drawConnectors(lastLandmarks, PoseLandmarker.POSE_CONNECTIONS, {color: '#ff0', lineWidth: 2});
+
+        if(frameCount % 30 === 0){ // كل 30 فريم بس عشان ما يزحم اللوغ
+          log('💀 جسم مكتشف - جاهز للحفظ');
+        }
+      }
+    }
+  }, 100);
+}
+</script>
+</body>
+</html>
