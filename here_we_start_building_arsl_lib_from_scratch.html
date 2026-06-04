@@ -1,0 +1,117 @@
+﻿<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>SLS حروف عربية</title>
+<style>
+body{margin:0;background:#000;color:#0f0;text-align:center;padding:10px;font-family:tahoma}
+#box{position:relative;display:inline-block;margin-top:10px}
+video, canvas{width:640px;height:480px;border:3px solid #0f0;border-radius:10px}
+canvas{position:absolute;top:0;left:0}
+button{padding:12px 25px;font-size:16px;background:#0f0;color:#000;border:none;margin:5px;cursor:pointer;border-radius:8px;font-weight:bold}
+#result{font-size:60px;color:yellow;margin:15px;font-weight:bold;min-height:80px}
+#log{background:#111;border:2px solid #0f0;padding:8px;margin-top:8px;text-align:right;color:#0ff;font-size:12px;height:150px;overflow-y:auto}
+.small{font-size:14px;color:#aaa}
+</style>
+</head>
+<body>
+<h2>🔥 الكاميرا بتعرف حروف عربية</h2>
+<button onclick="startCam()">1. شغل الكاميرا</button>
+<button onclick="startDetect()">2. ابدأ التعرف</button>
+
+<div id="result">الحرف:...</div>
+<div class="small">جرب: أ، ب، ت، ث، ج، د، هـ</div>
+
+<div id="box">
+  <video id="v" autoplay playsinline muted></video>
+  <canvas id="c" width="640" height="480"></canvas>
+</div>
+
+<div id="log">اضغط 1 ثم 2<br></div>
+
+<script type="module">
+import {HandLandmarker, FilesetResolver, DrawingUtils} from "https://cdn.skypack.dev/@mediapipe/tasks-vision@0.10.3";
+
+const log = t => {document.getElementById('log').innerHTML += t + '<br>'; console.log(t)};
+const video = document.getElementById('v');
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const resultDiv = document.getElementById('result');
+let handLandmarker, drawingUtils;
+
+// ====== قاموس الحروف العربية ArSL المبسط ======
+function classifyArabicLetter(landmarks){
+  // نحسب حالة كل أصبع: 1=مرفوع، 0=مطوي
+  const thumbUp = landmarks[4].x > landmarks[2].x; // الإبهام
+  const indexUp = landmarks[8].y < landmarks[6].y;
+  const middleUp = landmarks[12].y < landmarks[10].y;
+  const ringUp = landmarks[16].y < landmarks[14].y;
+  const pinkyUp = landmarks[20].y < landmarks[18].y;
+
+  // نمط الأصابع: إبهام، سبابة، وسط، بنصر، خنصر
+  let pattern = [thumbUp, indexUp, middleUp, ringUp, pinkyUp].map(b=>b?1:0).join('');
+
+  // قاموس حروف عربية - ممكن تعدلو حسب SLS حقتكم
+  const dict = {
+    '00000': 'أ', // قبضة كاملة - ألف
+    '01000': 'ب', // سبابة بس - باء
+    '01100': 'ت', // سبابة + وسط - تاء
+    '01110': 'ث', // 3 أصابع - ثاء
+    '10000': 'ج', // إبهام بس - جيم
+    '00100': 'د', // وسط بس - دال
+    '11000': 'هـ', // إبهام + سبابة - هاء
+    '01010': 'ح', // سبابة + بنصر - حاء V مقلوبة
+    '11111': 'و' // كل الأصابع مفتوحة - واو
+  };
+
+  return dict[pattern] || '?';
+}
+
+window.startCam = async function(){
+  log('1. فتح الكاميرا...');
+  const stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480}});
+  video.srcObject = stream;
+  await video.play();
+  log('2. الكاميرا شغالة ✅');
+}
+
+window.startDetect = async function(){
+  log('3. تحميل موديل اليد...');
+  const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
+
+  handLandmarker = await HandLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: "CPU"
+    },
+    runningMode: "VIDEO",
+    numHands: 1
+  });
+  log('4. الموديل جاهز ✅ اعمل حرف عربي قدام الكاميرا');
+
+  drawingUtils = new DrawingUtils(ctx);
+
+  function detectFrame(){
+    let startTimeMs = performance.now();
+    const result = handLandmarker.detectForVideo(video, startTimeMs);
+
+    ctx.clearRect(0,0,640,480);
+
+    if(result.landmarks && result.landmarks.length > 0){
+      const landmarks = result.landmarks[0];
+      drawingUtils.drawLandmarks(landmarks, {color: '#0f0', lineWidth: 2});
+      drawingUtils.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, {color: '#ff0', lineWidth: 2});
+
+      let letter = classifyArabicLetter(landmarks);
+      resultDiv.innerHTML = 'الحرف: ' + letter;
+    } else {
+      resultDiv.innerHTML = 'الحرف:...';
+    }
+
+    requestAnimationFrame(detectFrame);
+  }
+  detectFrame();
+}
+</script>
+</body>
+</html>
